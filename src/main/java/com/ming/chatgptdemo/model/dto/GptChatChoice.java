@@ -8,7 +8,6 @@ import org.springframework.stereotype.Component;
  * GPT返回choice对象
  */
 @Data
-@Component
 public class GptChatChoice {
 
     /**

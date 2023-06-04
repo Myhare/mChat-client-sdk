@@ -34,4 +34,9 @@ public class HttpConstant {
      * api密钥前面需要加上的值
      */
     public static final String BEARER = "Bearer ";
+
+    /**
+     * 流式消息结束终止符
+     */
+    public static final String DONE = "[DONE]";
 }

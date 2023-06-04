@@ -40,4 +40,9 @@ public class GptChatRequestBody {
      */
     private List<String> stop;
 
+    /**
+     * 是否以流的形式返回
+     */
+    private boolean stream;
+
 }
