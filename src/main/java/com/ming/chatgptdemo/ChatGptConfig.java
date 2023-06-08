@@ -14,12 +14,12 @@ public class ChatGptConfig {
     /**
      * 代理url
      */
-    public String proxyUrl = "127.0.0.1";
+    public String proxyUrl;
 
     /**
      * 代理端口
      */
-    public Integer proxyPort = 7890;
+    public Integer proxyPort;
 
     /**
      * 私钥

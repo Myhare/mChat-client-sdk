@@ -1,42 +1,45 @@
 package com.ming.chatgptdemo;
 
-import cn.hutool.core.io.IoUtil;
-import cn.hutool.core.util.CharsetUtil;
 import cn.hutool.core.util.StrUtil;
-import cn.hutool.http.HttpResponse;
 import cn.hutool.http.HttpUtil;
 import cn.hutool.json.JSONUtil;
 import com.ming.chatgptdemo.client.ChatClient;
-import com.ming.chatgptdemo.constant.HttpConstant;
 import com.ming.chatgptdemo.constant.MessageRoleConstant;
-import com.ming.chatgptdemo.model.dto.GptChatChoice;
 import com.ming.chatgptdemo.model.dto.GptChatStreamChoice;
 import com.ming.chatgptdemo.model.dto.MessageDTO;
 import com.ming.chatgptdemo.model.request.GptChatRequestBody;
-import com.ming.chatgptdemo.model.response.GptChatResponse;
 import com.ming.chatgptdemo.model.response.GptChatStreamResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import reactor.core.publisher.Flux;
 
-import java.io.*;
-import java.nio.charset.StandardCharsets;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.time.Duration;
+import java.time.LocalTime;
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Date;
+import java.util.List;
 import java.util.Scanner;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-import static com.ming.chatgptdemo.constant.GptModelConstant.GPT_TURBO;
+import static com.ming.chatgptdemo.constant.GptModelConstant.*;
 import static com.ming.chatgptdemo.constant.HttpConstant.*;
-import static com.ming.chatgptdemo.constant.HttpConstant.BEARER;
+
 
 /**
- * 测试
+ * 测试GPT接口
  */
 @RestController
 public class TestController {
@@ -54,12 +57,10 @@ public class TestController {
         return "hello，成功进入";
     }
 
-    private static final String[] WORDS = "The quick brown fox jumps over the lazy dog.".split(" ");
-
     // 创建一个线程池
     private final ExecutorService cachedThreadPool = Executors.newCachedThreadPool();
 
-    private SseEmitter emitter;
+    // private SseEmitter emitter;
 
     @GetMapping("/testGpt")
     public MessageDTO te(){
@@ -160,9 +161,9 @@ public class TestController {
 
         StringBuffer reStringBuffer = new StringBuffer();
 
-        // 发送HTTP请求，设置stream参数为true\
+        // 发送HTTP请求，设置stream参数为true
         ArrayList<MessageDTO> messageDTOList = new ArrayList<>();
-        messageDTOList.add(new MessageDTO(MessageRoleConstant.USER, "写一个50字左右的自我介绍"));
+        messageDTOList.add(new MessageDTO(MessageRoleConstant.USER, "帮我写一个100字左右的自我介绍"));
         GptChatRequestBody requestBody = GptChatRequestBody.builder()
                 .model(GPT_TURBO)
                 .messages(messageDTOList)
@@ -190,10 +191,11 @@ public class TestController {
                                 return;
                             }
                             GptChatStreamResponse chatStreamResponse = JSONUtil.toBean(responseJson, GptChatStreamResponse.class);
+                            System.out.println(chatStreamResponse);
                             GptChatStreamChoice choice = chatStreamResponse.getChoices().get(0);
                             String content = choice.getDelta().getContent();
                             if (StrUtil.isNotBlank(content)){
-                                System.out.println(choice.getDelta().getContent());
+                                // System.out.println(choice.getDelta().getContent());
                                 reStringBuffer.append(choice.getDelta().getContent());
                                 try {
                                     emitter.send(choice);
@@ -215,6 +217,47 @@ public class TestController {
         return emitter;
     }
 
+    // 测试流式请求3
+    @GetMapping("/stream3/{message}")
+    public SseEmitter streamData3(@PathVariable("message")String message){
+        SseEmitter sseEmitter = new SseEmitter();
+        try {
+            chatClient.streamSend(sseEmitter ,message, streamReDTO -> {
+                System.out.println("获取到的完整数据" + streamReDTO.getContent());
+            });
+        } catch (Exception e) {
+            System.out.println(e.getMessage());
+            System.out.println("发生错误，可能是api连接不稳定，请试着更换节点");
+            sseEmitter.completeWithError(e);
+            e.printStackTrace();
+        }
+        return sseEmitter;
+    }
 
 
+    private final List<SseEmitter> emitters = new CopyOnWriteArrayList<>();
+
+    @GetMapping("/events")
+    public SseEmitter getEvents() {
+        SseEmitter emitter = new SseEmitter();
+
+        // 在后台线程中模拟数据推送
+        new Thread(() -> {
+            try {
+                for (int i = 1; i <= 100; i++) {
+                    // 模拟每秒发送一个事件
+                    Thread.sleep(1000);
+                    emitter.send("Event " + i);
+
+                    // 可以使用自定义的数据类型作为事件
+                    // emitter.send(new MyEventData("Event " + i));
+                }
+                emitter.complete(); // 完成事件发送
+            } catch (Exception e) {
+                emitter.completeWithError(e); // 发生错误时完成事件发送
+            }
+        }).start();
+
+        return emitter;
+    }
 }

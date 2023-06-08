@@ -39,4 +39,14 @@ public class HttpConstant {
      * 流式消息结束终止符
      */
     public static final String DONE = "[DONE]";
+
+    /**
+     * 代理本机url
+     */
+    public static final String PROXY_URL = "127.0.0.1";
+
+    /**
+     * 代理本机默认端口
+     */
+    public static final Integer PROXY_PORT = 7890;
 }

@@ -7,16 +7,29 @@ import cn.hutool.http.HttpUtil;
 import cn.hutool.json.JSONUtil;
 import com.ming.chatgptdemo.ChatGptConfig;
 import com.ming.chatgptdemo.constant.MessageRoleConstant;
+import com.ming.chatgptdemo.model.dto.GptChatStreamChoice;
 import com.ming.chatgptdemo.model.dto.MessageDTO;
+import com.ming.chatgptdemo.model.dto.StreamReDTO;
 import com.ming.chatgptdemo.model.request.GptChatRequestBody;
 import com.ming.chatgptdemo.model.request.GptRequestBody;
 import com.ming.chatgptdemo.model.response.GptChatResponse;
+import com.ming.chatgptdemo.model.response.GptChatStreamResponse;
 import com.ming.chatgptdemo.model.response.GptResponse;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import reactor.core.publisher.Mono;
 
+import java.io.IOException;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 
 import static com.ming.chatgptdemo.constant.GptModelConstant.GPT_TURBO;
 import static com.ming.chatgptdemo.constant.GptModelConstant.TEXT_DAVINCI_003;
@@ -27,6 +40,14 @@ public class ChatClient {
 
     @Autowired
     private ChatGptConfig chatGptConfig;
+
+    @Autowired
+    private WebClient webClient;
+
+    /**
+     * 创建一个线程池
+     */
+    private final ExecutorService cachedThreadPool = Executors.newCachedThreadPool();
 
     /**
      * 历史消息列表
@@ -68,16 +89,13 @@ public class ChatClient {
             if (StrUtil.isBlank(message)){
                 throw new RuntimeException("消息为空");
             }
-            if (messageList.size() >= chatGptConfig.getChatLargestContext() * 2){
-                messageList.remove(0);
-                messageList.remove(0);
-            }
-            messageList.add(new MessageDTO(MessageRoleConstant.USER, message));
+            sizeControl(this.messageList);
+            this.messageList.add(new MessageDTO(MessageRoleConstant.USER, message));
             // 再次获取，判断是否是引用类型
             // 请求体
             GptChatRequestBody requestBody = GptChatRequestBody.builder()
                     .model(GPT_TURBO)
-                    .messages(messageList)
+                    .messages(this.messageList)
                     .build();
             // 发送请求
             HttpResponse response = getChatGptRequest(requestBody, API_URL).execute();
@@ -94,7 +112,7 @@ public class ChatClient {
             String content = reMessage.getContent();
             String role = reMessage.getRole();
             // 将GPT的回答存入消息列表中
-            messageList.add(new MessageDTO(role, content));
+            this.messageList.add(new MessageDTO(role, content));
             return reMessage;
         } catch (RuntimeException e) {
             e.printStackTrace();
@@ -103,7 +121,7 @@ public class ChatClient {
     }
 
     /**
-     * 对话api（支持上下文）
+     * 对话api 通过方法传参传递历史消息
      * @param message 问的消息
      * @return        回答
      */
@@ -112,10 +130,7 @@ public class ChatClient {
             if (StrUtil.isBlank(message)){
                 throw new RuntimeException("消息为空");
             }
-            if (messageList.size() >= chatGptConfig.getChatLargestContext() * 2){
-                messageList.remove(0);
-                messageList.remove(0);
-            }
+            sizeControl(messageList);
             messageList.add(new MessageDTO(MessageRoleConstant.USER, message));
             // 再次获取，判断是否是引用类型
             // 请求体
@@ -143,6 +158,81 @@ public class ChatClient {
         } catch (RuntimeException e) {
             e.printStackTrace();
             return messageList;
+        }
+    }
+
+    /**
+     * 流式发送消息，消息发送完成后执行函数式接口
+     */
+    public void streamSend(SseEmitter sseEmitter ,String message, Consumer<StreamReDTO> consumer) {
+
+        StringBuilder reStringBuffer = new StringBuilder();
+
+        sizeControl(this.messageList);
+        this.messageList.add(new MessageDTO(MessageRoleConstant.USER, message));
+
+        // 发送HTTP请求，设置stream参数为true
+        GptChatRequestBody requestBody = GptChatRequestBody.builder()
+                .model(GPT_TURBO)
+                .messages(this.messageList)
+                .stream(true)
+                .build();
+
+        cachedThreadPool.execute(() -> {
+
+            webClient.post()
+                    .uri("https://api.openai.com/v1/chat/completions")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .accept(MediaType.APPLICATION_JSON)
+                    .header(AUTHORIZATION, BEARER + chatGptConfig.apiKey)
+                    .bodyValue(JSONUtil.toJsonStr(requestBody))
+                    .retrieve() // 获取响应体
+                    .bodyToFlux(String.class)// 处理多个响应流
+                    // 正常处理的结果
+                    .subscribe(responseJson -> {
+                        if (DONE.equals(responseJson)){
+                            // 说明消息传递完成
+                            // 用户通过函数式接口自己选择对完整的数据进行操作
+                            consumer.accept(new StreamReDTO(reStringBuffer));
+                            // 将GPT的回答存入消息列表
+                            messageList.add(new MessageDTO(MessageRoleConstant.ASSISTANT, reStringBuffer.toString()));
+                            sseEmitter.complete();
+                            return;
+                        }
+                        GptChatStreamResponse chatStreamResponse = JSONUtil.toBean(responseJson, GptChatStreamResponse.class);
+                        GptChatStreamChoice choice = chatStreamResponse.getChoices().get(0);
+                        String content = choice.getDelta().getContent();
+                        if (StrUtil.isNotBlank(content)){
+                            // System.out.println(choice.getDelta().getContent());
+                            reStringBuffer.append(choice.getDelta().getContent());
+                            try {
+                                sseEmitter.send(choice);
+                                // TimeUnit.SECONDS.sleep(1);
+                            } catch (Exception e) {
+                                // 将当前的消息删除
+                                messageList.remove(message.length()-1);
+                                sseEmitter.completeWithError(e);
+                            }
+                        }
+                    });
+
+        });
+    }
+
+    /**
+     * 获取历史消息
+     */
+    public List<MessageDTO> getHistoricalMessage(){
+        return this.messageList;
+    }
+
+    /**
+     * 控制历史消息信息的长度
+     */
+    private void sizeControl(List<MessageDTO> messageList){
+        if (messageList.size() >= chatGptConfig.getChatLargestContext() * 2){
+            messageList.remove(0);
+            messageList.remove(0);
         }
     }
 

@@ -10,9 +10,6 @@ public class GptChatStreamChoice {
      */
     private DeltaDTO delta;
 
-    /**
-     * 回答下标
-     */
     private Integer index;
 
     private String finish_reason;

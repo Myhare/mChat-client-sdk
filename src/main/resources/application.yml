@@ -1,11 +1,11 @@
-server:
-  port: 8080
-
-chatgpt:
-  api:
-    api-key: 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
-    chat-largest-context: 20  # 最大上下文数量
-    proxy-url: 127.0.0.1 #代理地址
-    proxy-port: 7890 #代理的端口
-    temperature: 0.9 # 随机因子
-
+#server:
+#  port: 8081
+#
+#chatgpt:
+#  api:
+#    api-key:
+#    chat-largest-context: 20  # 最大上下文数量
+#    proxy-url: 127.0.0.1 #代理地址
+#    proxy-port: 7890 #代理的端口
+#    temperature: 0.9 # 随机因子
+#

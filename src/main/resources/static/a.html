@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>SSE Example</title>
+</head>
+<body>
+<div id="events"></div>
+
+<script>
+    // 创建一个EventSource对象来接收服务器发送的事件
+    var eventSource = new EventSource('/stream3/你好啊');
+
+    // 当接收到事件时的回调函数
+    eventSource.onmessage = function(event) {
+        var eventData = event.data;
+        console.log(eventData);
+        // 在页面上显示事件数据
+        document.getElementById('events').innerHTML += eventData + '<br>';
+    };
+
+    // 处理错误情况
+    eventSource.onerror = function(event) {
+        console.error('连接异常关闭', event);
+        eventSource.close(); // 关闭EventSource连接
+    };
+</script>
+</body>
+</html>
